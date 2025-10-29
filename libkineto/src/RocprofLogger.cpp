@@ -654,6 +654,16 @@ void RocprofLogger::api_callback(
             endTime);
         insert_row_to_buffer(row);
       }
+      // External correlation
+      static RocprofLogger* dis = &singleton();
+      for (int it = RocLogger::CorrelationDomain::begin; it < RocLogger::CorrelationDomain::end;
+           ++it) {
+        if (t_externalIds[it].size() > 0) {
+          std::lock_guard<std::mutex> lock(dis->externalCorrelationsMutex_);
+          dis->externalCorrelations_[it].emplace_back(
+              record.correlation_id.internal, t_externalIds[it].back());
+        }
+      }
     } // ROCPROFILER_CALLBACK_PHASE_EXIT
   } // ROCPROFILER_CALLBACK_TRACING_HIP_RUNTIME_API
 }
