@@ -18,11 +18,11 @@
 
 #include "CuptiActivityApi.h"
 #ifdef HAS_ROCTRACER
-  #ifndef ROCTRACER_FALLBACK
+#ifndef ROCTRACER_FALLBACK
 #include "RocprofActivityApi.h"
-  #else
+#else
 #include "RoctracerActivityApi.h"
-  #endif
+#endif
 #endif
 
 #include "ThreadUtil.h"
@@ -71,13 +71,13 @@ ActivityProfilerController::ActivityProfilerController(
 #endif // !USE_GOOGLE_LOG
 
 #ifdef HAS_ROCTRACER
-  #ifndef ROCTRACER_FALLBACK
+#ifndef ROCTRACER_FALLBACK
   profiler_ = std::make_unique<CuptiActivityProfiler>(
       RocprofActivityApi::singleton(), cpuOnly);
-  #else
+#else
   profiler_ = std::make_unique<CuptiActivityProfiler>(
       RoctracerActivityApi::singleton(), cpuOnly);
-  #endif
+#endif
 #else
   profiler_ = std::make_unique<CuptiActivityProfiler>(
       CuptiActivityApi::singleton(), cpuOnly);
@@ -319,18 +319,34 @@ void ActivityProfilerController::scheduleTrace(const Config& config) {
     LOG(WARNING) << "Ignored request - profiler busy";
     return;
   }
+
   int64_t currentIter = iterationCount_;
+  std::unique_ptr<Config> configToSchedule;
+
   if (config.hasProfileStartIteration() && currentIter < 0) {
-    LOG(WARNING) << "Ignored profile iteration count based request as "
-                 << "application is not updating iteration count";
-    return;
+    // Special case: daemon config with activitiesDuration set
+    if (config.activitiesDuration().count() > 0) {
+      LOG(INFO) << "Config with duration-based profiling, "
+                << "ignoring iteration count requirement";
+      // Continue with modified config - clone and set profileStartIteration to
+      // -1
+      configToSchedule = config.clone();
+      configToSchedule->setProfileStartIteration(-1);
+    } else {
+      LOG(WARNING) << "Ignored profile iteration count based request as "
+                   << "application is not updating iteration count";
+      return;
+    }
+  } else {
+    configToSchedule = config.clone();
   }
 
+  // Common scheduling logic
   bool newConfigScheduled = false;
   if (!asyncRequestConfig_) {
     std::lock_guard<std::mutex> lock(asyncConfigLock_);
     if (!asyncRequestConfig_) {
-      asyncRequestConfig_ = config.clone();
+      asyncRequestConfig_ = std::move(configToSchedule);
       newConfigScheduled = true;
     }
   }

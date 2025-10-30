@@ -35,11 +35,9 @@ class Flush {
 };
 static Flush s_flush;
 
-uint32_t RoctracerApiIdList::mapName(const std::string& apiName)
-{
+uint32_t RoctracerApiIdList::mapName(const std::string& apiName) {
   uint32_t cid = 0;
-  roctracer_op_code(
-          ACTIVITY_DOMAIN_HIP_API, apiName.c_str(), &cid, nullptr);
+  roctracer_op_code(ACTIVITY_DOMAIN_HIP_API, apiName.c_str(), &cid, nullptr);
   return cid;
 }
 
@@ -60,7 +58,9 @@ thread_local std::deque<uint64_t>
     t_externalIds[RocLogger::CorrelationDomain::size];
 }
 
-void RoctracerLogger::pushCorrelationID(uint64_t id, RocLogger::CorrelationDomain type) {
+void RoctracerLogger::pushCorrelationID(
+    uint64_t id,
+    RocLogger::CorrelationDomain type) {
   if (!singleton().externalCorrelationEnabled_) {
     return;
   }
@@ -275,7 +275,8 @@ void RoctracerLogger::api_callback(
         } break;
       } // switch
       // External correlation
-      for (int it = RocLogger::CorrelationDomain::begin; it < RocLogger::CorrelationDomain::end;
+      for (int it = RocLogger::CorrelationDomain::begin;
+           it < RocLogger::CorrelationDomain::end;
            ++it) {
         if (t_externalIds[it].size() > 0) {
           std::lock_guard<std::mutex> lock(dis->externalCorrelationsMutex_);
@@ -330,7 +331,8 @@ void RoctracerLogger::setMaxEvents(uint32_t maxBufferSize) {
 void RoctracerLogger::startLogging() {
   if (!registered_) {
     roctracer_set_properties(
-        ACTIVITY_DOMAIN_HIP_API, nullptr); // Magic encantation
+        ACTIVITY_DOMAIN_HIP_API,
+        nullptr); // Magic encantation
 
     // Set some api calls to ignore
     loggedIds_.setInvertMode(true); // Omit the specified api
