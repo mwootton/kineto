@@ -267,9 +267,6 @@ class RocprofLoggerShared {
   // <rocprofiler_profile_config_id_t.handle, rocprofiler_agent_v0_t>
   agent_info_map_t agents = {};
 
-  std::map<uint64_t, kernel_args> kernelargs;
-  std::map<uint64_t, copy_args> copyargs;
-
  private:
   RocprofLoggerShared() {
     s = this;
@@ -607,8 +604,8 @@ void RocprofLogger::api_callback(
 
       rocprofCopyRow* row = new rocprofCopyRow(
           record.correlation_id.internal,
-          args.kind,
-          args.operation,
+          record.kind,
+          record.operation,
           processId(),
           systemThreadId(),
           startTime,
