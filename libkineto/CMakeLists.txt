@@ -120,60 +120,16 @@ if(KINETO_BACKEND STREQUAL "cuda")
     message(STATUS "Found NVPERF")
   endif()
 elseif(KINETO_BACKEND STREQUAL "rocm")
-  # ROCm prerequisites and version detection
-  if(NOT ROCM_SOURCE_DIR AND NOT ROCTRACER_INCLUDE_DIR)
+  if(NOT ROCM_SOURCE_DIR)
     message(FATAL_ERROR
-      "KINETO_BACKEND=rocm but neither ROCM_SOURCE_DIR nor ROCTRACER_INCLUDE_DIR is set. "
+      "KINETO_BACKEND=rocm but ROCM_SOURCE_DIR is not set. "
       "Set ROCM_SOURCE_DIR (or the ROCM_SOURCE_DIR environment variable) "
       "or set KINETO_BACKEND=cpu.")
   endif()
   if(NOT ROCM_INCLUDE_DIRS)
     set(ROCM_INCLUDE_DIRS "${ROCM_SOURCE_DIR}/include")
   endif()
-  if(NOT ROCTRACER_INCLUDE_DIR)
-    set(ROCTRACER_INCLUDE_DIR "${ROCM_SOURCE_DIR}/include/roctracer")
-  endif()
-  message(STATUS " ROCTRACER_INCLUDE_DIR = ${ROCTRACER_INCLUDE_DIR}")
-
-  find_file(ROCM_VERSION_HEADER_PATH
-    NAMES rocm-core/rocm_version.h
-    NO_DEFAULT_PATH
-    PATHS ${ROCM_INCLUDE_DIRS}
-  )
-  if(NOT EXISTS ${ROCM_VERSION_HEADER_PATH})
-    message(FATAL_ERROR
-      "KINETO_BACKEND=rocm but rocm-core/rocm_version.h was not found in "
-      "${ROCM_INCLUDE_DIRS}. Check ROCM_SOURCE_DIR / ROCM_INCLUDE_DIRS or "
-      "set KINETO_BACKEND=cpu.")
-  endif()
-  set(ROCM_HEADER_FILE ${ROCM_VERSION_HEADER_PATH})
-
-  message(STATUS "Reading ROCM version from: ${ROCM_HEADER_FILE}")
-  file(READ "${ROCM_HEADER_FILE}" ROCM_HEADER_CONTENT)
-
-  string(REGEX MATCH "ROCM_VERSION_MAJOR[ ]+[0-9]+" TEMP1 ${ROCM_HEADER_CONTENT})
-  string(REPLACE "ROCM_VERSION_MAJOR" "" TEMP2 ${TEMP1})
-  string(STRIP ${TEMP2} ROCM_VERSION_DEV_MAJOR)
-  string(REGEX MATCH "ROCM_VERSION_MINOR[ ]+[0-9]+" TEMP1 ${ROCM_HEADER_CONTENT})
-  string(REPLACE "ROCM_VERSION_MINOR" "" TEMP2 ${TEMP1})
-  string(STRIP ${TEMP2} ROCM_VERSION_DEV_MINOR)
-  string(REGEX MATCH "ROCM_VERSION_PATCH[ ]+[0-9]+" TEMP1 ${ROCM_HEADER_CONTENT})
-  string(REPLACE "ROCM_VERSION_PATCH" "" TEMP2 ${TEMP1})
-  string(STRIP ${TEMP2} ROCM_VERSION_DEV_PATCH)
-
-  message(STATUS "ROCM major: ${ROCM_VERSION_DEV_MAJOR}")
-  message(STATUS "ROCM minor: ${ROCM_VERSION_DEV_MINOR}")
-  message(STATUS "ROCM patch: ${ROCM_VERSION_DEV_PATCH}")
-
-  # Use rocprofiler-sdk for rocm version 6.4 forward
-  if((ROCM_VERSION_DEV_MAJOR GREATER_EQUAL 7) OR (ROCM_VERSION_DEV_MAJOR GREATER_EQUAL 6 AND ROCM_VERSION_DEV_MINOR GREATER_EQUAL 4))
-    set(USE_ROCPROFILER_SDK ON)
-  endif()
-  if(USE_ROCPROFILER_SDK)
-    message(STATUS "Building with: rocprofiler-sdk")
-  else()
-    message(STATUS "Building with: libroctracer")
-  endif()
+  message(STATUS "Building with: rpd_tracer")
 elseif(KINETO_BACKEND STREQUAL "xpu")
   # XPU plugin
   add_subdirectory(src/plugin/xpupti)
@@ -188,13 +144,8 @@ elseif(KINETO_BACKEND STREQUAL "cuda")
   get_filelist("get_libkineto_cupti_srcs(with_api=False)" LIBKINETO_SRCS)
   message(STATUS " Building with cupti")
 elseif(KINETO_BACKEND STREQUAL "rocm")
-  if(USE_ROCPROFILER_SDK)
-    get_filelist("get_libkineto_rocprofiler_srcs(with_api=False)" LIBKINETO_SRCS)
-    message(STATUS " Building with rocprofiler-sdk")
-  else()
-    get_filelist("get_libkineto_roctracer_srcs(with_api=False)" LIBKINETO_SRCS)
-    message(STATUS " Building with roctracer")
-  endif()
+  get_filelist("get_libkineto_rpd_srcs(with_api=False)" LIBKINETO_SRCS)
+  message(STATUS " Building with rpd_tracer")
 elseif(KINETO_BACKEND STREQUAL "xpu")
   get_filelist("get_libkineto_xpupti_srcs(with_api=False)" LIBKINETO_SRCS)
   message(STATUS " Building with xpupti")
@@ -223,9 +174,6 @@ if(KINETO_BACKEND STREQUAL "cuda")
   endif()
 elseif(KINETO_BACKEND STREQUAL "rocm")
   list(APPEND KINETO_DEFINITIONS "HAS_ROCTRACER")
-  if(NOT USE_ROCPROFILER_SDK)
-    list(APPEND KINETO_DEFINITIONS "ROCTRACER_FALLBACK")
-  endif()
   target_compile_definitions(kineto_base PRIVATE "__HIP_PLATFORM_HCC__")
   target_compile_definitions(kineto_base PRIVATE "__HIP_PLATFORM_AMD__")
 elseif(KINETO_BACKEND STREQUAL "xpu")
@@ -324,21 +272,11 @@ if(KINETO_BACKEND STREQUAL "cuda")
   endif()
 elseif(KINETO_BACKEND STREQUAL "rocm")
   target_include_directories(kineto_base SYSTEM PUBLIC
-        $<BUILD_INTERFACE:${ROCTRACER_INCLUDE_DIR}>
         $<BUILD_INTERFACE:${ROCM_INCLUDE_DIRS}>)
-  if(USE_ROCPROFILER_SDK)
-    find_library(ROCPROF_LIBRARY NAMES librocprofiler-sdk.so HINTS
-      ${ROCM_SOURCE_DIR}/lib)
-  else()
-    find_library(ROCPROF_LIBRARY NAMES libroctracer64.so HINTS
-      ${ROCM_SOURCE_DIR}/lib)
-  endif()
-  target_link_libraries(kineto "${ROCPROF_LIBRARY}")
-  target_link_libraries(kineto_base PUBLIC "${ROCPROF_LIBRARY}")
   find_library(KINETO_HIP_LIBRARY NAMES libamdhip64.so HINTS
     ${ROCM_SOURCE_DIR}/lib)
-  target_link_libraries(kineto "${KINETO_HIP_LIBRARY}")
-  target_link_libraries(kineto_base PUBLIC "${KINETO_HIP_LIBRARY}")
+  target_link_libraries(kineto "${KINETO_HIP_LIBRARY}" dl sqlite3)
+  target_link_libraries(kineto_base PUBLIC "${KINETO_HIP_LIBRARY}" dl sqlite3)
 elseif(KINETO_BACKEND STREQUAL "xpu")
   # Bare form, not $<BUILD_INTERFACE:...>, because XPUPTI_INCLUDE_DIR is a
   # multi-path semicolon list (SYCL + PTI). Wrapping a list in a single

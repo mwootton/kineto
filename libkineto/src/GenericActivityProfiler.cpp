@@ -474,8 +474,10 @@ void GenericActivityProfiler::configure(
     LOG(WARNING) << "GenericActivityProfiler already busy, terminating";
     return;
   }
+#if !defined(HAS_ROCTRACER)
   ApproximateClockToUnixTimeConverter clockConverter;
   get_time_converter() = clockConverter.makeConverter();
+#endif
 
   config_ = config.clone();
 
@@ -611,8 +613,8 @@ void GenericActivityProfiler::toggleCollectionDynamic(const bool enable) {
 }
 
 void GenericActivityProfiler::startTraceInternal(
-    const time_point<system_clock>& now) {
-  captureWindowStartTime_ = libkineto::timeSinceEpoch(now);
+    [[maybe_unused]] const time_point<system_clock>& now) {
+  captureWindowStartTime_ = getApproximateTime();
   VLOG(0) << "Warmup -> CollectTrace";
   for (auto& session : sessions_) {
     LOG(INFO) << "Starting child profiler session";
@@ -622,8 +624,8 @@ void GenericActivityProfiler::startTraceInternal(
 }
 
 void GenericActivityProfiler::stopTraceInternal(
-    const time_point<system_clock>& now) {
-  captureWindowEndTime_ = libkineto::timeSinceEpoch(now);
+    [[maybe_unused]] const time_point<system_clock>& now) {
+  captureWindowEndTime_ = getApproximateTime();
   if (!cpuOnly_) {
     time_point<system_clock> timestamp;
     if (VLOG_IS_ON(1)) {

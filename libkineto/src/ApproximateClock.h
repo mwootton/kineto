@@ -81,12 +81,16 @@ inline uint64_t getArmApproximateTime() {
 // TODO: We should use
 // `https://github.com/google/benchmark/blob/main/src/cycleclock.h`
 inline auto getApproximateTime() {
-#if defined(KINETO_RDTSC)
+#if defined(KINETO_RDTSC) && !defined(HAS_ROCTRACER)
   return static_cast<uint64_t>(__rdtsc());
-#elif defined(KINETO_ARMTSC)
+#elif defined(KINETO_ARMTSC) && !defined(HAS_ROCTRACER)
   return getArmApproximateTime();
 #else
-  return getTime();
+  // On ROCm, use CLOCK_MONOTONIC to match roctracer/rocprofiler/rpd_tracer
+  // timestamp domain. TSC (__rdtsc) is not reliably monotonic across AMD
+  // CCDs/sockets and the ~15ns overhead difference vs CLOCK_MONOTONIC (via
+  // vDSO) is negligible compared to profiled API call durations.
+  return getTime(true);
 #endif
 }
 
