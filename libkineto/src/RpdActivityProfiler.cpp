@@ -465,8 +465,14 @@ void RpdActivityProfiler::processGpuActivities(ActivityLogger& logger) {
       std::string name;
       if (hasKernel && kernelName[0] != '\0') {
         name = demangle(kernelName);
-      } else {
+      } else if (description[0] != '\0') {
         name = description;
+      } else if (isMemcpy && hasCopy) {
+        name = fmt::format("Memcpy ({} bytes)", copySize);
+      } else if (isMemcpy) {
+        name = "Memcpy";
+      } else {
+        name = "GPU op";
       }
 
       GenericTraceActivity act;

@@ -242,9 +242,12 @@ class ChromeTraceBaseTime {
     get();
   }
   int64_t get() {
-    // Make all timestamps relative to 3 month intervals.
+#if defined(HAS_ROCTRACER)
+    static int64_t base_time = 0;
+#else
     static int64_t base_time = libkineto::timeSinceEpoch(std::chrono::time_point<std::chrono::system_clock>(
         std::chrono::floor<_trimonths>(std::chrono::system_clock::now())));
+#endif
     return base_time;
   }
 };
