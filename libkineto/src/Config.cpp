@@ -105,6 +105,11 @@ constexpr char kProfileMemoryDuration[] = "PROFILE_MEMORY_DURATION_MSECS";
 // Roctracer
 constexpr char kRoctracerSetMaxEvents[] = "ROCTRACER_MAX_EVENTS";
 
+// RPD
+constexpr char kRpdDatasourceKey[] = "RPD_DATASOURCE";
+constexpr char kRpdDatasourcePriorityKey[] = "RPD_DATASOURCE_PRIORITY";
+constexpr char kRpdFilenameKey[] = "RPD_FILENAME";
+
 // Common
 
 // Client-side timestamp used for synchronized start across hosts for
@@ -447,6 +452,12 @@ bool Config::handleOption(const std::string& name, std::string& val) {
     requestGroupTraceID_ = val;
   } else if (!name.compare(kRoctracerSetMaxEvents)) {
     maxEvents_ = toInt32(val);
+  } else if (!name.compare(kRpdDatasourceKey)) {
+    rpdDatasource_ = val;
+  } else if (!name.compare(kRpdDatasourcePriorityKey)) {
+    rpdDatasourcePriority_ = val;
+  } else if (!name.compare(kRpdFilenameKey)) {
+    rpdFilename_ = val;
   }
 
   // TODO: Deprecate Client Interface

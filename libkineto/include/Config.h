@@ -388,6 +388,18 @@ class Config : public AbstractConfig {
     return maxEvents_;
   }
 
+  [[nodiscard]] const std::string& rpdDatasource() const {
+    return rpdDatasource_;
+  }
+
+  [[nodiscard]] const std::string& rpdDatasourcePriority() const {
+    return rpdDatasourcePriority_;
+  }
+
+  [[nodiscard]] const std::string& rpdFilename() const {
+    return rpdFilename_;
+  }
+
  private:
   explicit Config(const Config& other) = default;
 
@@ -522,6 +534,11 @@ class Config : public AbstractConfig {
 
   // Roctracer settings
   uint32_t maxEvents_{5000000};
+
+  // RPD settings
+  std::string rpdDatasource_;
+  std::string rpdDatasourcePriority_;
+  std::string rpdFilename_{":memory:"};
 };
 
 constexpr char kUseDaemonEnvVar[] = "KINETO_USE_DAEMON";

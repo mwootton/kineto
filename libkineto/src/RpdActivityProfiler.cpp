@@ -10,6 +10,7 @@
 
 #include <dlfcn.h>
 #include <fmt/format.h>
+#include <sqlite3.h>
 
 #include <algorithm>
 #include <cstdlib>
@@ -50,20 +51,21 @@ struct RpdActivityProfiler::RpdActivityProfilerPrivate {
   std::once_flag initFlag;
 
   using VoidFn = void (*)();
-  using RangePushFn = void (*)(const char*, const char*, const char*);
-  using RangePopFn = void (*)();
+  using SetConfigFn = void (*)(const char*, const char*);
+  using GetConnectionFn = sqlite3* (*)();
+  using ResetStorageFn = void (*)();
 
   VoidFn rpdstart{nullptr};
   VoidFn rpdstop{nullptr};
   VoidFn rpdflush{nullptr};
-  RangePushFn rpd_rangePush{nullptr};
-  RangePopFn rpd_rangePop{nullptr};
+  SetConfigFn rpd_setConfig{nullptr};
+  GetConnectionFn rpd_getConnection{nullptr};
+  ResetStorageFn rpd_resetStorage{nullptr};
 
   int64_t captureStartMonoNs{0};
   int64_t captureEndMonoNs{0};
   bool tracingActive{false};
-
-  std::string rpdFilePath;
+  int sessionCounter{0};
 
   struct CorrelationEvent {
     int64_t monoNs;
@@ -76,37 +78,38 @@ struct RpdActivityProfiler::RpdActivityProfilerPrivate {
   std::mutex correlationMutex;
 
   void ensureLoaded() {
-    handle = dlopen("librpd_tracer.so", RTLD_NOW | RTLD_NOLOAD);
-    if (!handle) {
-      setenv("RPDT_AUTOSTART", "0", 0);
-      handle = dlopen("librpd_tracer.so", RTLD_NOW);
+    if (dlopen("librpd_embedded.so", RTLD_NOW | RTLD_NOLOAD)) {
+      LOG(WARNING) << "librpd_embedded.so already loaded by another component";
+      return;
     }
+    handle = dlopen("librpd_embedded.so", RTLD_NOW);
     if (!handle) {
-      LOG(INFO) << "librpd_tracer.so not available";
+      LOG(INFO) << "librpd_embedded.so not available";
       return;
     }
 
     rpdstart = reinterpret_cast<VoidFn>(dlsym(handle, "rpdstart"));
     rpdstop = reinterpret_cast<VoidFn>(dlsym(handle, "rpdstop"));
     rpdflush = reinterpret_cast<VoidFn>(dlsym(handle, "rpdflush"));
-    rpd_rangePush =
-        reinterpret_cast<RangePushFn>(dlsym(handle, "rpd_rangePush"));
-    rpd_rangePop =
-        reinterpret_cast<RangePopFn>(dlsym(handle, "rpd_rangePop"));
+    rpd_setConfig =
+        reinterpret_cast<SetConfigFn>(dlsym(handle, "rpd_setConfig"));
+    rpd_getConnection =
+        reinterpret_cast<GetConnectionFn>(dlsym(handle, "rpd_getConnection"));
+    rpd_resetStorage =
+        reinterpret_cast<ResetStorageFn>(dlsym(handle, "rpd_resetStorage"));
 
-    if (!rpdstart || !rpdstop || !rpdflush) {
-      LOG(WARNING) << "librpd_tracer.so loaded but missing symbols:"
-                   << (!rpdstart ? " rpdstart" : "")
-                   << (!rpdstop ? " rpdstop" : "")
-                   << (!rpdflush ? " rpdflush" : "");
+    if (!rpdstart || !rpdstop || !rpdflush || !rpd_setConfig ||
+        !rpd_getConnection || !rpd_resetStorage) {
+      LOG(WARNING) << "librpd_embedded.so loaded but missing symbols";
       return;
     }
 
-    const char* env = std::getenv("RPDT_FILENAME");
-    rpdFilePath = env ? std::string(env) : "./trace.rpd";
+    rpd_setConfig("autostart", "0");
+    rpd_setConfig("directwrite", "1");
+    rpd_setConfig("quiet", "1");
 
     available = true;
-    LOG(INFO) << "RPD tracer available, output: " << rpdFilePath;
+    LOG(INFO) << "RPD embedded tracer loaded";
   }
 
   // ---- Correlation interval logic ----
@@ -237,6 +240,36 @@ void RpdActivityProfiler::enableGpuTracing() {
   if (!d_->available) {
     return;
   }
+
+  // Configure RPD before starting
+  const auto& filename = config().rpdFilename();
+  if (filename != ":memory:" && d_->sessionCounter > 0) {
+    auto dot = filename.rfind('.');
+    std::string sessionFilename = (dot != std::string::npos)
+        ? filename.substr(0, dot) + "_" +
+              std::to_string(d_->sessionCounter) + filename.substr(dot)
+        : filename + "_" + std::to_string(d_->sessionCounter);
+    d_->rpd_setConfig("filename", sessionFilename.c_str());
+  } else {
+    d_->rpd_setConfig("filename", filename.c_str());
+  }
+  ++d_->sessionCounter;
+
+  d_->rpd_setConfig("datasources_exclude",
+      "RoctxDataSource,NvtxDataSource,RlogDataSource,RocmSmiDataSource");
+
+  const auto& priority = config().rpdDatasourcePriority();
+  if (!priority.empty()) {
+    d_->rpd_setConfig("datasources_priority", priority.c_str());
+  }
+
+  const auto& ds = config().rpdDatasource();
+  if (!ds.empty()) {
+    d_->rpd_setConfig("datasources_explicit", ds.c_str());
+  }
+
+  d_->rpd_resetStorage();
+
   d_->captureStartMonoNs = monoTimeNs();
   d_->rpdstart();
   d_->tracingActive = true;
@@ -324,8 +357,9 @@ void RpdActivityProfiler::processGpuActivities(ActivityLogger& logger) {
   RpdActivityProfilerPrivate::IntervalMap userIntervals;
   d_->buildCorrelationIntervals(defaultIntervals, userIntervals);
 
-  SqliteDb db(d_->rpdFilePath);
+  SqliteConnection db(d_->rpd_getConnection());
   if (!db) {
+    LOG(WARNING) << "Failed to get RPD database connection";
     return;
   }
 
@@ -352,10 +386,7 @@ void RpdActivityProfiler::processGpuActivities(ActivityLogger& logger) {
         "JOIN rocpd_string sName ON a.apiName_id = sName.id "
         "WHERE a.domain_id IN "
         "  (SELECT id FROM rocpd_string WHERE string = 'hip') "
-        "  AND a.end >= ?1 AND a.start <= ?2 "
         "ORDER BY a.start");
-    stmt.bindInt64(1, captureWindowStartTime_);
-    stmt.bindInt64(2, captureWindowEndTime_);
 
     while (stmt.step()) {
       int64_t apiId = stmt.colInt64(0);
@@ -425,10 +456,7 @@ void RpdActivityProfiler::processGpuActivities(ActivityLogger& logger) {
         "LEFT JOIN rocpd_kernelapi k ON k.api_ptr_id = ao.api_id "
         "LEFT JOIN rocpd_string sk ON k.kernelName_id = sk.id "
         "LEFT JOIN rocpd_copyapi c ON c.api_ptr_id = ao.api_id "
-        "WHERE o.end >= ?1 AND o.start <= ?2 "
         "ORDER BY o.start");
-    stmt.bindInt64(1, captureWindowStartTime_);
-    stmt.bindInt64(2, captureWindowEndTime_);
 
     while (stmt.step()) {
       int gpuId = stmt.colInt(1);

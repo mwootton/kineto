@@ -36,27 +36,16 @@ inline std::string bandwidth(int64_t bytes, int64_t durationNs) {
 
 // SQLite wrappers
 
-class SqliteDb {
+class SqliteConnection {
  public:
-  explicit SqliteDb(const std::string& path) {
-    int rc = sqlite3_open_v2(
-        path.c_str(), &db_, SQLITE_OPEN_READONLY, nullptr);
-    if (rc != SQLITE_OK) {
-      LOG(WARNING) << "Failed to open RPD database: " << path
-                   << " (" << sqlite3_errmsg(db_) << ")";
-      if (db_) {
-        sqlite3_close(db_);
-        db_ = nullptr;
-      }
-    }
-  }
-  ~SqliteDb() {
+  explicit SqliteConnection(sqlite3* db) : db_(db) {}
+  ~SqliteConnection() {
     if (db_) {
       sqlite3_close(db_);
     }
   }
-  SqliteDb(const SqliteDb&) = delete;
-  SqliteDb& operator=(const SqliteDb&) = delete;
+  SqliteConnection(const SqliteConnection&) = delete;
+  SqliteConnection& operator=(const SqliteConnection&) = delete;
 
   sqlite3* get() const { return db_; }
   explicit operator bool() const { return db_ != nullptr; }
